@@ -1,25 +1,89 @@
+from random import random
+import scipy as sp
+import scipy.interpolate
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
-from scipy.fft import fft
+from scipy.fft import fft, ifft
 
-drone_present = 0
-file_counter = 150
+drone_present = 1
+file_counter = 0
 pa_ref = 20e-6 # 20 micropascals reference
 prop_freq = 80 # Hz
 prop_amp = 0.00001 # Pa
 noise_dB = 60
+bandwidth = 40 # Hz
 #noise_rms = 0.0001 # Pa - 0.0001 corresponds to 14 dB OASPL
 noise_rms = 10**(noise_dB/20)*pa_ref
 print("dB Noise = ",noise_dB,"\nRMS Noise = ",noise_rms,"Pascals")
 sample_rate = 50000 # Hz
 length = 1 # seconds
 time = np.arange(0,length,1/sample_rate)
+numPoints = sample_rate * length
+
+def log_interp(zz,xx,yy):
+    logz = np.log10(zz)
+    logx = np.log10(xx)
+    logy = np.log10(yy)
+    return np.power(10.0, np.interp(logz, logx, logy))
+
+def psd_to_time(freq,amp,numPoints):
+  nums = []
+  count = 0
+  lowFreq = freq[count]
+  highFreq = freq[count + 1] # no error checks for now
+  lowAmp = amp[count]
+  highAmp = amp[count + 1]
+  points = np.linspace(freq[0],freq[-1],num=numPoints)
+  for j in range(0,numPoints):
+    if points[j] == highFreq:
+        temp = highAmp
+    else:
+      if points[j] > highFreq:
+        count = count + 1
+        lowFreq = freq[count]
+        highFreq = freq[count + 1] # no error checks for now
+        lowAmp = amp[count]
+        highAmp = amp[count + 1]
+      temp = log_interp(points[j],[lowFreq,highFreq],[lowAmp,highAmp])
+    nums.append(temp)
+
+  yuck = np.zeros(10000)
+  duh = np.ones(10000)
+  for j in range(1,len(yuck)):
+    yuck[j] = np.random.normal(0.0,1.0)
+    duh[j] = duh[j] * np.sin(2*3.14159265*100*j/1000)
+    yuck[j] = yuck[j] + duh[j]
+
+  halfRange = len(nums)
+  print(halfRange)
+  for j in range(1,halfRange):
+    #print(halfRange-j+1)
+    temp = nums[halfRange-j]
+    nums.append(temp)
+
+  complexNums = []
+  for j in range(0,len(nums)):
+    randomPhase = 2*np.pi*np.random.uniform(0,1)
+    complexNums.append(complex(nums[j]*np.sin(randomPhase),nums[j]*np.cos(randomPhase)))
+
+  print("Length of frequency vector is",len(nums))
+  gfg_inversed = ifft(complexNums)
+  return gfg_inversed, nums
+  
+def calculate_OASPL(data):
+  oaspl = 50
+  return oaspl
+  
 for k in range(file_counter,file_counter+10):
   y = np.random.normal(0, noise_rms, length*sample_rate)
   buzz = drone_present * prop_amp * np.sin(2*np.pi*prop_freq*time)
   buzz4 = drone_present * prop_amp * np.sin(2*np.pi*prop_freq*4*time) # assuming quadcopter harmonics
-  y_total = y + buzz + buzz4
+  freq = [20,prop_freq-bandwidth,prop_freq-bandwidth/2,prop_freq+bandwidth/2,prop_freq+bandwidth,4*prop_freq-bandwidth,4*prop_freq-bandwidth/2,4*prop_freq+bandwidth/2,4*prop_freq+bandwidth,2000]
+  amp = [1e-9,1e-9,prop_amp,prop_amp,1e-9,1e-9,prop_amp/2,prop_amp/2,1e-9,1e-9]
+  buzzn, times = psd_to_time(freq, amp, numPoints)
+  #y_total = y + buzz + buzz4
+  y_total = y + buzzn[0:numPoints]
   rms = np.sqrt(np.mean(y**2))
   print("true RMS = ",rms)
   dB = 20*np.log10(rms/pa_ref)
@@ -28,13 +92,13 @@ for k in range(file_counter,file_counter+10):
   y_short = np.zeros(y_total.shape[0],dtype='f4')
   for i in range(y_total.shape[0]):
      y_short[i] = y_total[i].astype(float)
-  output_filename = 'simdata\\test_binary' + str(k) + '.dat'
+  output_filename = 'simdata\\testrandom_binary' + str(k) + '.dat'
   binary_file = open(output_filename,'wb')
   binary_file.write(drone_present.to_bytes(2, byteorder='big', signed=False))
   binary_file.write(y_short)
   binary_file.close()
 
-  text_filename = 'simdata\\test_binary' + str(k) + '.csv'
+  text_filename = 'simdata\\testrandom_binary' + str(k) + '.csv'
   wtr = csv.writer(open(text_filename,'w'),lineterminator='\n')
   for x in y_short:
      wtr.writerow([x])
@@ -64,14 +128,14 @@ for k in range(file_counter,file_counter+10):
      p_short[i] = p[i].astype(float)
      f_short[i] = freq[i].astype(float)
   duh = np.stack((f_short, p_short), axis = 1)
-  output_filename = 'simdata\\psd_binary' + str(k) + '.dat'
+  output_filename = 'simdata\\psdrandom_binary' + str(k) + '.dat'
   psd_file = open(output_filename,'wb')
   psd_file.write(drone_present.to_bytes(2, byteorder='big', signed=False))
   psd_file.write(duh)
   psd_file.close()
 
   y_fft = fft(y_total)
-  output_filename = 'simdata\\fft_binary' + str(k) + '.dat'
+  output_filename = 'simdata\\fftrandom_binary' + str(k) + '.dat'
   fft_file = open(output_filename,'wb')
   fft_file.write(drone_present.to_bytes(2, byteorder='big', signed=False))
   fft_file.write(y_fft)
@@ -83,12 +147,12 @@ for k in range(file_counter,file_counter+10):
      real_short[i] = y_array[i,0].astype(float)
      imag_short[i] = y_array[i,1].astype(float)
   duh_fft = np.stack((real_short, imag_short), axis = 1)
-  output_filename = 'simdata\\fft_binary' + str(k) + '.dat'
+  output_filename = 'simdata\\fftrandom_binary' + str(k) + '.dat'
   fft_file = open(output_filename,'wb')
   fft_file.write(drone_present.to_bytes(2, byteorder='big', signed=False))
   fft_file.write(duh_fft)
   fft_file.close()
-  text_filename = 'simdata\\fft_binary' + str(k) + '.csv'
+  text_filename = 'simdata\\fftrandom_binary' + str(k) + '.csv'
   wtr = csv.writer(open(text_filename,'w'),lineterminator='\n')
   for x in range(duh_fft.shape[0]):
      wtr.writerow(duh_fft[x,:])
